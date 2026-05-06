@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WM-Tippspiel</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">WM-Tippspiel</div>
+    <nav id="nav" class="nav hidden">
+      <a href="#spiele">Spiele</a>
+      <a href="#turnierbaum">Turnierbaum</a>
+      <a href="#admin" id="nav-admin" class="hidden">Admin</a>
+    </nav>
+    <div id="user-area" class="user-area">
+      <span id="user-name"></span>
+      <button id="logout-btn" class="link hidden">Abmelden</button>
+    </div>
+  </header>
+
+  <main id="app">
+    <div id="loading" class="empty">Lade…</div>
+  </main>
+
+  <div id="modal-root"></div>
+
+  <!-- Login -->
+  <template id="tpl-login">
+    <div class="auth-split">
+      <div class="auth-left">
+        <video class="auth-video" src="worldcup.mp4" autoplay muted loop playsinline></video>
+        <div class="auth-video-overlay"></div>
+        <img src="logo.png" class="auth-logo" alt="Logo" />
+        <h1 class="auth-title">WM-Tippspiel 2026</h1>
+        <p class="auth-sub">Tippe dich zum Sieg</p>
+      </div>
+      <div class="auth-right">
+        <h2 class="auth-form-title">Willkommen</h2>
+        <div class="tabs auth-tabs">
+          <button class="tab active" data-mode="login">Anmelden</button>
+          <button class="tab" data-mode="register">Registrieren</button>
+        </div>
+        <form id="auth-form" class="form">
+          <label class="field name-field hidden">
+            <span>Name</span>
+            <input name="name" type="text" autocomplete="name" />
+          </label>
+          <label class="field">
+            <span>E-Mail</span>
+            <input name="email" type="email" required autocomplete="email" />
+          </label>
+          <label class="field">
+            <span>Passwort</span>
+            <input name="password" type="password" required minlength="6" autocomplete="current-password" />
+          </label>
+          <button type="submit" class="primary" style="margin-top:6px">Anmelden</button>
+          <p id="auth-error" class="error"></p>
+        </form>
+      </div>
+    </div>
+  </template>
+
+  <!-- Leaderboard (Top 5) -->
+  <template id="tpl-leaderboard">
+    <section class="card leaderboard-card">
+      <h2>Tabelle – Top 5</h2>
+      <ol class="leaderboard"></ol>
+    </section>
+  </template>
+
+  <!-- Spiele-Karte -->
+  <template id="tpl-spiel-card">
+    <button type="button" class="spiel-card">
+      <div class="sc-meta">
+        <div class="sc-meta-left">
+          <span class="sc-date"></span>
+          <span class="sc-timer"></span>
+        </div>
+        <span class="sc-tip-label"></span>
+      </div>
+      <div class="sc-body">
+        <span class="sc-team sc-home"></span>
+        <div class="sc-tip-box">
+          <div class="sc-tip-score"></div>
+        </div>
+        <span class="sc-team sc-away"></span>
+      </div>
+    </button>
+  </template>
+
+  <!-- Bracket-Match-Karte -->
+  <template id="tpl-bracket-match">
+    <button type="button" class="bracket-match">
+      <div class="bm-meta"></div>
+      <div class="bm-row">
+        <span class="bm-team bm-home"></span>
+        <span class="bm-score"></span>
+        <span class="bm-team bm-away"></span>
+      </div>
+      <div class="bm-tip"></div>
+    </button>
+  </template>
+
+  <!-- Tipp-Modal -->
+  <template id="tpl-bet-modal">
+    <div class="modal-backdrop">
+      <div class="modal card">
+        <h2 class="modal-title"></h2>
+        <p class="modal-meta"></p>
+        <div class="bet-row">
+          <span class="team team-home"></span>
+          <input class="score" type="number" min="0" max="20" inputmode="numeric" />
+          <span>:</span>
+          <input class="score" type="number" min="0" max="20" inputmode="numeric" />
+          <span class="team team-away"></span>
+        </div>
+        <p class="error modal-error"></p>
+        <div class="modal-actions">
+          <button type="button" class="link cancel-btn">Abbrechen</button>
+          <button type="button" class="primary save-btn">Tipp speichern</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- Gruppen-Karte -->
+  <template id="tpl-group-card">
+    <article class="card group-card">
+      <h3 class="group-title"></h3>
+      <table class="group-table">
+        <thead>
+          <tr><th>#</th><th class="t">Team</th><th>Sp</th><th>S</th><th>U</th><th>N</th><th>Tore</th><th>Diff</th><th>Pkt</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="group-matches"></div>
+    </article>
+  </template>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
