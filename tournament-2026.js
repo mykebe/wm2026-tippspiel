@@ -43,52 +43,71 @@ function groupMatches() {
   return matches;
 }
 
-// R32-Pairings (1X = Sieger Gruppe X, 2X = Zweiter, T1..T8 = beste Dritte sortiert)
-// HINWEIS: TODO — gegen offizielle FIFA-2026-Map abgleichen.
+// R32-Pairings — offizielle FIFA-2026-Map.
+// Zeiten in UTC (Anstoßzeiten aus MESZ-Spielplan umgerechnet).
+// best_third_from = bester Dritter aus dem angegebenen Gruppen-Pool.
+// Reihenfolge im Array bestimmt die `order`-Werte (1000+i) und damit die
+// visuelle Position im Turnierbaum: je 2 aufeinanderfolgende R32-Einträge
+// speisen dasselbe R16-Spiel.
 const KO_PAIRINGS = [
-  // R32 (16 Spiele)
-  { slot: "R32_1", home: { type: "group_winner", groupId: "A" }, away: { type: "best_third", rank: 1 } },
-  { slot: "R32_2", home: { type: "group_winner", groupId: "B" }, away: { type: "best_third", rank: 2 } },
-  { slot: "R32_3", home: { type: "group_winner", groupId: "C" }, away: { type: "best_third", rank: 3 } },
-  { slot: "R32_4", home: { type: "group_winner", groupId: "D" }, away: { type: "best_third", rank: 4 } },
-  { slot: "R32_5", home: { type: "group_winner", groupId: "E" }, away: { type: "best_third", rank: 5 } },
-  { slot: "R32_6", home: { type: "group_winner", groupId: "F" }, away: { type: "best_third", rank: 6 } },
-  { slot: "R32_7", home: { type: "group_winner", groupId: "G" }, away: { type: "best_third", rank: 7 } },
-  { slot: "R32_8", home: { type: "group_winner", groupId: "H" }, away: { type: "best_third", rank: 8 } },
-  { slot: "R32_9", home: { type: "group_winner", groupId: "I" }, away: { type: "group_runner_up", groupId: "L" } },
-  { slot: "R32_10", home: { type: "group_winner", groupId: "J" }, away: { type: "group_runner_up", groupId: "K" } },
-  { slot: "R32_11", home: { type: "group_winner", groupId: "K" }, away: { type: "group_runner_up", groupId: "J" } },
-  { slot: "R32_12", home: { type: "group_winner", groupId: "L" }, away: { type: "group_runner_up", groupId: "I" } },
-  { slot: "R32_13", home: { type: "group_runner_up", groupId: "A" }, away: { type: "group_runner_up", groupId: "B" } },
-  { slot: "R32_14", home: { type: "group_runner_up", groupId: "C" }, away: { type: "group_runner_up", groupId: "D" } },
-  { slot: "R32_15", home: { type: "group_runner_up", groupId: "E" }, away: { type: "group_runner_up", groupId: "F" } },
-  { slot: "R32_16", home: { type: "group_runner_up", groupId: "G" }, away: { type: "group_runner_up", groupId: "H" } },
+  // R32 — linke Klammerhälfte (speisen R16_1–4)
+  { slot: "R32_1",  kickoff: "2026-06-29T17:00:00Z", home: { type: "group_runner_up",    groupId: "A" }, away: { type: "group_runner_up", groupId: "B" } },
+
+  { slot: "R32_2",  kickoff: "2026-06-30T17:00:00Z", home: { type: "group_winner", groupId: "F" }, away: { type: "group_runner_up", groupId: "C" } },
+  
+  { slot: "R32_3",  kickoff: "2026-06-28T19:00:00Z", home: { type: "group_winner", groupId: "E" }, away: { type: "best_third_from", groups: ["A","B","C","D","F"]} },
+  
+  { slot: "R32_4",  kickoff: "2026-06-29T20:30:00Z", home: { type: "group_winner",    groupId: "I" }, away: { type: "best_third_from", groups: ["C","D","F","G","H"] } },
+  
+  { slot: "R32_5",  kickoff: "2026-06-30T01:00:00Z", home: { type: "group_runner_up",    groupId: "K" }, away: { type: "group_runner_up", groupId: "L" } },
+
+  { slot: "R32_6",  kickoff: "2026-06-30T21:00:00Z", home: { type: "group_winner",    groupId: "H" }, away: { type: "group_runner_up", groupID: "J" } },
+
+  { slot: "R32_7",  kickoff: "2026-07-01T01:00:00Z", home: { type: "group_winner",    groupId: "D" }, away: { type: "best_third_from", groups: ["B","E","F","I","J"] } },
+
+  { slot: "R32_8",  kickoff: "2026-07-01T16:00:00Z", home: { type: "group_winner",    groupId: "G" }, away: { type: "best_third_from", groups: ["A","E","H","I","J"] } },
+
+  // R32 — rechte Klammerhälfte (speisen R16_5–8, Display umgekehrt)
+  { slot: "R32_9", kickoff: "2026-07-03T22:00:00Z", home: { type: "group_winner",    groupId: "K" }, away: { type: "best_third_from", groups: ["D","E","I","J","L"] } },
+
+  { slot: "R32_10", kickoff: "2026-07-03T03:00:00Z", home: { type: "group_winner",    groupId: "B" }, away: { type: "best_third_from", groups: ["E","F","G","I","J"] } },
+
+  { slot: "R32_11", kickoff: "2026-07-04T01:30:00Z", home: { type: "group_runner_up",    groupId: "D" }, away: { type: "group_runner_up", groupId: "G" } },
+
+  { slot: "R32_12", kickoff: "2026-07-03T18:00:00Z", home: { type: "group_winner", groupId: "J" }, away: { type: "group_runner_up", groupId: "H" } },
+
+  { slot: "R32_13", kickoff: "2026-07-02T00:00:00Z", home: { type: "group_winner",    groupId: "F" }, away: { type: "group_runner_up", groupId: "C" } },
+
+  { slot: "R32_14",  kickoff: "2026-07-01T20:00:00Z", home: { type: "group_winner",    groupId: "A" }, away: { type: "best_third_from", groups: ["C","E","F","H","I"] } },
+
+  { slot: "R32_15", kickoff: "2026-07-02T23:00:00Z", home: { type: "group_runner_up", groupId: "E" }, away: { type: "group_runner_up", groupId: "I" } },
+
+  { slot: "R32_16", kickoff: "2026-07-02T19:00:00Z", home: { type: "group_winner",    groupId: "C" }, away: { type: "group_runner_up", groupId: "F" } },  
 ];
 
-// R16 (8): Sieger benachbarter R32-Spiele
-for (let i = 0; i < 8; i++) {
-  KO_PAIRINGS.push({
-    slot: `R16_${i + 1}`,
-    home: { type: "match_winner", matchSlot: `R32_${2 * i + 1}` },
-    away: { type: "match_winner", matchSlot: `R32_${2 * i + 2}` },
-  });
-}
-// QF (4)
-for (let i = 0; i < 4; i++) {
-  KO_PAIRINGS.push({
-    slot: `QF_${i + 1}`,
-    home: { type: "match_winner", matchSlot: `R16_${2 * i + 1}` },
-    away: { type: "match_winner", matchSlot: `R16_${2 * i + 2}` },
-  });
-}
-// SF (2)
-for (let i = 0; i < 2; i++) {
-  KO_PAIRINGS.push({
-    slot: `SF_${i + 1}`,
-    home: { type: "match_winner", matchSlot: `QF_${2 * i + 1}` },
-    away: { type: "match_winner", matchSlot: `QF_${2 * i + 2}` },
-  });
-}
+// R16 (8 Spiele) — offizielle FIFA-2026-Paarungen (Spiele 89–96)
+KO_PAIRINGS.push(
+  { slot: "R16_1", kickoff: "2026-07-04T21:00:00Z", home: { type: "match_winner", matchSlot: "R32_1"  }, away: { type: "match_winner", matchSlot: "R32_2"  } },
+  { slot: "R16_2", kickoff: "2026-07-04T17:00:00Z", home: { type: "match_winner", matchSlot: "R32_3"  }, away: { type: "match_winner", matchSlot: "R32_4"  } },
+  { slot: "R16_3", kickoff: "2026-07-05T20:00:00Z", home: { type: "match_winner", matchSlot: "R32_5"  }, away: { type: "match_winner", matchSlot: "R32_6"  } },
+  { slot: "R16_4", kickoff: "2026-07-06T00:00:00Z", home: { type: "match_winner", matchSlot: "R32_7"  }, away: { type: "match_winner", matchSlot: "R32_8"  } },
+  { slot: "R16_5", kickoff: "2026-07-06T19:00:00Z", home: { type: "match_winner", matchSlot: "R32_9" }, away: { type: "match_winner", matchSlot: "R32_10" } },
+  { slot: "R16_6", kickoff: "2026-07-07T00:00:00Z", home: { type: "match_winner", matchSlot: "R32_11"  }, away: { type: "match_winner", matchSlot: "R32_12" } },
+  { slot: "R16_7", kickoff: "2026-07-07T16:00:00Z", home: { type: "match_winner", matchSlot: "R32_13" }, away: { type: "match_winner", matchSlot: "R32_14" } },
+  { slot: "R16_8", kickoff: "2026-07-07T20:00:00Z", home: { type: "match_winner", matchSlot: "R32_15" }, away: { type: "match_winner", matchSlot: "R32_16" } },
+);
+// QF (4) — Spiele 97–100
+KO_PAIRINGS.push(
+  { slot: "QF_1", home: { type: "match_winner", matchSlot: "R16_1" }, away: { type: "match_winner", matchSlot: "R16_2" } },
+  { slot: "QF_2", home: { type: "match_winner", matchSlot: "R16_3" }, away: { type: "match_winner", matchSlot: "R16_4" } },
+  { slot: "QF_3", home: { type: "match_winner", matchSlot: "R16_7" }, away: { type: "match_winner", matchSlot: "R16_8" } },
+  { slot: "QF_4", home: { type: "match_winner", matchSlot: "R16_5" }, away: { type: "match_winner", matchSlot: "R16_6" } },
+);
+// SF (2) — Spiele 101–102
+KO_PAIRINGS.push(
+  { slot: "SF_1", home: { type: "match_winner", matchSlot: "QF_1" }, away: { type: "match_winner", matchSlot: "QF_2" } },
+  { slot: "SF_2", home: { type: "match_winner", matchSlot: "QF_3" }, away: { type: "match_winner", matchSlot: "QF_4" } },
+);
 // Spiel um Platz 3
 KO_PAIRINGS.push({
   slot: "THIRD",
@@ -132,7 +151,7 @@ function knockoutMatches() {
     awaySlot: null,
     homeRef: p.home,
     awayRef: p.away,
-    kickoff: KO_DATES[koGroupId(p.slot)],
+    kickoff: p.kickoff || KO_DATES[koGroupId(p.slot)],
   }));
 }
 
@@ -159,6 +178,8 @@ export function refLabel(ref) {
   if (ref.type === "group_winner") return `Sieger Gruppe ${ref.groupId}`;
   if (ref.type === "group_runner_up") return `Zweiter Gruppe ${ref.groupId}`;
   if (ref.type === "best_third") return `Bester Dritter #${ref.rank}`;
+  if (ref.type === "best_third_from") return `Bester Dritter (${ref.groups.join("/")})`;
+
   if (ref.type === "match_winner") return `Sieger ${ref.matchSlot}`;
   if (ref.type === "match_loser") return `Verlierer ${ref.matchSlot}`;
   return "?";

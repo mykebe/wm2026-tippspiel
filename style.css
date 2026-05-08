@@ -58,51 +58,6 @@ html, body {
 
 .user-area { display: flex; align-items: center; gap: 12px; color: var(--muted); }
 
-.group-chip {
-  display: inline-flex;
-  align-items: center;
-  background: var(--accent);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 3px 10px;
-  border-radius: 999px;
-  text-decoration: none;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.group-chip:hover { background: var(--accent-dark); }
-
-/* Groups page */
-.group-list { display: flex; flex-direction: column; gap: 10px; }
-.group-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg);
-}
-.group-row-active { border-color: var(--accent); background: #fff5f7; }
-.group-row-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.group-row-name { font-weight: 700; font-size: 15px; }
-.group-row-meta { font-size: 12px; color: var(--muted); }
-.group-invite-code {
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 2px;
-}
-.group-invite-code strong {
-  font-family: monospace;
-  font-size: 14px;
-  color: var(--accent);
-  letter-spacing: 1px;
-}
-
 main {
   max-width: 720px;
   margin: 0 auto;
@@ -1051,3 +1006,113 @@ button.link:hover { color: var(--text); }
 .modal-title .team-label .flag { height: 18px; max-width: 28px; }
 .bet-row .team .team-label .flag { height: 18px; max-width: 28px; }
 .admin-match .label .team-label .flag { height: 12px; max-width: 20px; }
+
+/* Andere Tipps */
+.teilnehmer-card { margin-bottom: 10px; }
+
+.teilnehmer-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  gap: 12px;
+}
+.teilnehmer-card-header:hover .tn-teams { opacity: 0.85; }
+
+.tn-teams {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+}
+.tn-team { font-size: 15px; font-weight: 700; }
+.tn-home { flex: 1; text-align: right; }
+.tn-away { flex: 1; text-align: left; }
+.tn-home .team-label { flex-direction: row-reverse; }
+
+.tn-score {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--accent);
+  min-width: 60px;
+  text-align: center;
+  letter-spacing: 1px;
+  flex-shrink: 0;
+}
+.tn-score-pending { color: var(--border); font-weight: 400; }
+
+.tn-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.tn-meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.tn-chevron { font-size: 13px; color: var(--muted); transition: transform 0.2s; }
+.teilnehmer-card.open .tn-chevron { transform: rotate(180deg); }
+
+.teilnehmer-card-body {
+  display: none;
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.teilnehmer-card.open .teilnehmer-card-body { display: block; }
+
+.teilnehmer-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.teilnehmer-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.teilnehmer-table td {
+  padding: 8px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.teilnehmer-table tbody tr:last-child td { border-bottom: none; }
+
+.tn-me-row { background: #fff5f7; }
+.tn-me-tag {
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.tn-pts-3 { color: #047857; font-weight: 700; }
+.tn-pts-1 { color: #b45309; font-weight: 700; }
+.tn-pts-0 { color: var(--muted); }
+
+.tn-team .team-label .flag { height: 15px; max-width: 24px; }
+
+.tn-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 480px) {
+  .tn-two-col { grid-template-columns: 1fr; }
+}

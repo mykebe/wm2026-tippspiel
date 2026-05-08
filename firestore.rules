@@ -33,7 +33,9 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         betId.matches(".*_" + request.auth.uid) ||
         (resource != null && resource.data.uid == request.auth.uid) ||
-        isAdmin()
+        isAdmin() ||
+        (resource != null &&
+         get(/databases/$(database)/documents/matches/$(resource.data.matchId)).data.kickoff <= request.time)
       );
       allow create: if isSignedIn()
                     && request.resource.data.uid == request.auth.uid
@@ -66,20 +68,5 @@ service cloud.firestore {
       allow write: if isSignedIn();
     }
 
-    // betting groups — any signed-in user can read (needed to look up invite codes) and create.
-    // Only the group owner or admin can update/delete the group document.
-    match /groups/{groupId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update, delete: if isSignedIn() && (
-        request.auth.uid == resource.data.ownerId || isAdmin()
-      );
-    }
-
-    // group members — any signed-in user can read; each user can write their own membership.
-    match /groups/{groupId}/members/{uid} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn() && (request.auth.uid == uid || isAdmin());
-    }
   }
 }

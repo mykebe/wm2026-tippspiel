@@ -5,7 +5,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, setDoc, updateDoc, collection,
-  query, where, orderBy, getDocs, Timestamp, writeBatch, increment, arrayUnion
+  query, where, orderBy, getDocs, Timestamp, writeBatch, increment
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
 
 import { firebaseConfig, ADMIN_EMAIL } from "./firebase-config.js";
@@ -20,8 +20,6 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 const state = {
   user: null, profile: null, turnierTab: null, spieleFilter: "7d",
-  currentGroupId: null,
-  myGroups: [],
 };
 
 // ---------- helpers ----------
@@ -319,6 +317,16 @@ function rankBestThirds(matches, teamMap) {
   return thirds.sort((a, b) => b.pts - a.pts || b.diff - a.diff || b.gf - a.gf);
 }
 
+function rankBestThirdsFrom(groups, matches, teamMap) {
+  const thirds = [];
+  for (const g of groups) {
+    if (!isGroupComplete(g, matches)) return null;
+    const standings = computeGroupStandings(g, matches, teamMap);
+    thirds.push(standings[2]);
+  }
+  return thirds.sort((a, b) => b.pts - a.pts || b.diff - a.diff || b.gf - a.gf);
+}
+
 // ---------- KO resolver ----------
 function resolveRef(ref, allMatches, teamMap) {
   if (!ref) return null;
@@ -331,6 +339,11 @@ function resolveRef(ref, allMatches, teamMap) {
     const ranked = rankBestThirds(allMatches, teamMap);
     if (!ranked) return null;
     return ranked[ref.rank - 1]?.team || null;
+  }
+  if (ref.type === "best_third_from") {
+    const ranked = rankBestThirdsFrom(ref.groups, allMatches, teamMap);
+    if (!ranked) return null;
+    return ranked[0]?.team || null;
   }
   if (ref.type === "match_winner" || ref.type === "match_loser") {
     const m = allMatches.find(x => x.slot === ref.matchSlot);
@@ -654,19 +667,14 @@ async function renderSpiele() {
   grid.appendChild(right);
 
   // Load shared data once
-  const [allMatches, myBets] = await Promise.all([
+  const [allMatches, myBets, usersSnap] = await Promise.all([
     loadAllMatches(),
     loadMyBets(),
+    getDocs(collection(db, "users")),
   ]);
-  const userDocs = state.currentGroupId
-    ? await loadGroupMemberUsers(state.currentGroupId)
-    : (await getDocs(collection(db, "users"))).docs;
-  const usersSnap = { docs: userDocs };
 
   // Left column: leaderboard + stats
-  const currentGroup = state.myGroups.find(g => g.id === state.currentGroupId);
-  const lbTitle = currentGroup ? `${escapeHtml(currentGroup.name)} – Top 5` : "Tabelle – Top 5";
-  await renderLeaderboard(left, { uid: state.user?.uid, snap: usersSnap, title: lbTitle });
+  await renderLeaderboard(left, { uid: state.user?.uid, snap: usersSnap });
   renderStatsCard(left, myBets, allMatches, usersSnap);
 
   // Right column: heading + filter + matches
@@ -1074,165 +1082,6 @@ function renderKoTab(container, allMatches, myBets) {
   container.appendChild(bracket);
 }
 
-// ---------- groups ----------
-function updateGroupChip() {
-  const chip = $("#group-chip");
-  if (!chip) return;
-  const g = state.myGroups.find(g => g.id === state.currentGroupId);
-  chip.textContent = g ? g.name : "";
-  chip.classList.toggle("hidden", !g);
-}
-
-async function loadGroupMemberUsers(groupId) {
-  const membersSnap = await getDocs(collection(db, "groups", groupId, "members"));
-  const uids = membersSnap.docs.map(d => d.id);
-  const userDocs = await Promise.all(uids.map(uid => getDoc(doc(db, "users", uid))));
-  return userDocs.filter(d => d.exists());
-}
-
-async function renderGruppen() {
-  const main = $("#app");
-  main.innerHTML = "";
-  main.className = "";
-
-  // Handle pending invite code from deep link
-  const pendingCode = sessionStorage.getItem("pendingInviteCode");
-  if (pendingCode) sessionStorage.removeItem("pendingInviteCode");
-
-  // --- Card: Meine Gruppen ---
-  const myCard = document.createElement("section");
-  myCard.className = "card";
-  myCard.innerHTML = `<h2>Meine Gruppen</h2><div class="group-list"></div>`;
-  const groupList = myCard.querySelector(".group-list");
-
-  if (state.myGroups.length === 0) {
-    groupList.innerHTML = `<p style="color:var(--muted);font-size:14px">Du bist noch in keiner Gruppe. Erstelle eine oder tritt einer bei.</p>`;
-  } else {
-    state.myGroups.forEach(g => {
-      const isOwner = g.ownerId === state.user.uid;
-      const isActive = g.id === state.currentGroupId;
-      const row = document.createElement("div");
-      row.className = "group-row" + (isActive ? " group-row-active" : "");
-      row.innerHTML = `
-        <div class="group-row-info">
-          <span class="group-row-name">${escapeHtml(g.name)}</span>
-          <span class="group-row-meta">${g.memberCount || 1} Mitglied${(g.memberCount || 1) !== 1 ? "er" : ""}${isOwner ? " · Deine Gruppe" : ""}</span>
-          ${isOwner ? `<span class="group-invite-code">Einladungscode: <strong>${g.inviteCode}</strong></span>` : ""}
-        </div>
-        <button class="primary switch-btn" ${isActive ? "disabled" : ""}>${isActive ? "Aktiv" : "Wechseln"}</button>
-      `;
-      row.querySelector(".switch-btn").addEventListener("click", () => {
-        state.currentGroupId = g.id;
-        localStorage.setItem("currentGroupId", g.id);
-        updateGroupChip();
-        location.hash = "#spiele";
-      });
-      groupList.appendChild(row);
-    });
-  }
-  main.appendChild(myCard);
-
-  // --- Card: Gruppe erstellen ---
-  const createCard = document.createElement("section");
-  createCard.className = "card";
-  createCard.innerHTML = `
-    <h2>Gruppe erstellen</h2>
-    <div class="form">
-      <label class="field">
-        <span>Gruppenname</span>
-        <input id="new-group-name" type="text" placeholder="z.B. Lebensräume WM 2026" maxlength="50" />
-      </label>
-      <button type="button" class="primary" id="create-group-btn" style="margin-top:6px">Gruppe erstellen</button>
-      <p class="error" id="create-group-error"></p>
-    </div>
-  `;
-  const createBtn = createCard.querySelector("#create-group-btn");
-  const createInput = createCard.querySelector("#new-group-name");
-  const createErr = createCard.querySelector("#create-group-error");
-  createBtn.addEventListener("click", async () => {
-    const name = createInput.value.trim();
-    if (!name) { createErr.textContent = "Bitte Gruppenname eingeben."; return; }
-    createBtn.disabled = true;
-    createErr.textContent = "";
-    try {
-      const groupId = crypto.randomUUID();
-      const inviteCode = Math.random().toString(36).slice(2, 8).toUpperCase();
-      const uid = state.user.uid;
-      await setDoc(doc(db, "groups", groupId), {
-        name, ownerId: uid, inviteCode, createdAt: Timestamp.now(), memberCount: 1,
-      });
-      await setDoc(doc(db, "groups", groupId, "members", uid), {
-        name: state.profile.name, email: state.user.email, joinedAt: Timestamp.now(),
-      });
-      await updateDoc(doc(db, "users", uid), { groupIds: arrayUnion(groupId) });
-      const newGroup = { id: groupId, name, ownerId: uid, inviteCode, memberCount: 1 };
-      state.myGroups.push(newGroup);
-      state.currentGroupId = groupId;
-      localStorage.setItem("currentGroupId", groupId);
-      updateGroupChip();
-      renderGruppen();
-    } catch (err) {
-      createErr.textContent = "Fehler: " + (err.message || err);
-      createBtn.disabled = false;
-    }
-  });
-  main.appendChild(createCard);
-
-  // --- Card: Gruppe beitreten ---
-  const joinCard = document.createElement("section");
-  joinCard.className = "card";
-  joinCard.innerHTML = `
-    <h2>Gruppe beitreten</h2>
-    <div class="form">
-      <label class="field">
-        <span>Einladungscode</span>
-        <input id="join-code-input" type="text" placeholder="z.B. AB12CD" maxlength="6" style="text-transform:uppercase" />
-      </label>
-      <button type="button" class="primary" id="join-group-btn" style="margin-top:6px">Beitreten</button>
-      <p class="error" id="join-group-error"></p>
-    </div>
-  `;
-  if (pendingCode) joinCard.querySelector("#join-code-input").value = pendingCode.toUpperCase();
-  const joinBtn = joinCard.querySelector("#join-group-btn");
-  const joinInput = joinCard.querySelector("#join-code-input");
-  const joinErr = joinCard.querySelector("#join-group-error");
-  joinBtn.addEventListener("click", async () => {
-    const code = joinInput.value.trim().toUpperCase();
-    if (code.length < 4) { joinErr.textContent = "Bitte Einladungscode eingeben."; return; }
-    joinBtn.disabled = true;
-    joinErr.textContent = "";
-    try {
-      const snap = await getDocs(query(collection(db, "groups"), where("inviteCode", "==", code)));
-      if (snap.empty) throw new Error("Code nicht gefunden. Bitte prüfe den Code und versuche es erneut.");
-      const groupDoc = snap.docs[0];
-      const group = { id: groupDoc.id, ...groupDoc.data() };
-      const uid = state.user.uid;
-      if (state.myGroups.find(g => g.id === group.id)) {
-        state.currentGroupId = group.id;
-        localStorage.setItem("currentGroupId", group.id);
-        updateGroupChip();
-        location.hash = "#spiele";
-        return;
-      }
-      await setDoc(doc(db, "groups", group.id, "members", uid), {
-        name: state.profile.name, email: state.user.email, joinedAt: Timestamp.now(),
-      });
-      await updateDoc(doc(db, "groups", group.id), { memberCount: increment(1) });
-      await updateDoc(doc(db, "users", uid), { groupIds: arrayUnion(group.id) });
-      group.memberCount = (group.memberCount || 1) + 1;
-      state.myGroups.push(group);
-      state.currentGroupId = group.id;
-      localStorage.setItem("currentGroupId", group.id);
-      updateGroupChip();
-      renderGruppen();
-    } catch (err) {
-      joinErr.textContent = err.message || "Unbekannter Fehler.";
-      joinBtn.disabled = false;
-    }
-  });
-  main.appendChild(joinCard);
-}
-
 // ---------- admin ----------
 async function renderAdmin() {
   if (!isAdmin()) { location.hash = "#spiele"; return; }
@@ -1406,6 +1255,53 @@ async function renderAdmin() {
 
   renderList();
 
+  // --- KO-Paarungen synchronisieren ---
+  const koSyncCard = document.createElement("section");
+  koSyncCard.className = "card";
+  koSyncCard.style.marginBottom = "14px";
+  koSyncCard.innerHTML = `
+    <h2>KO-Paarungen aktualisieren</h2>
+    <p style="color:var(--muted);font-size:13px;margin-top:0">
+      Schreibt die Heim-/Auswärts-Referenzen (homeRef/awayRef) aller KO-Spiele aus <code>tournament-2026.js</code> neu in Firestore.
+      Ergebnisse, Tipp-Punkte und Anpfiffe bleiben unverändert.
+    </p>
+    <button class="primary ko-sync-btn">KO-Paarungen neu schreiben</button>
+    <p class="ko-sync-status" style="margin-top:8px;font-size:13px"></p>
+  `;
+  main.appendChild(koSyncCard);
+
+  $(".ko-sync-btn", koSyncCard).addEventListener("click", async () => {
+    if (!confirm("Alle homeRef/awayRef der KO-Spiele mit den Werten aus tournament-2026.js überschreiben?")) return;
+    const btn = $(".ko-sync-btn", koSyncCard);
+    const status = $(".ko-sync-status", koSyncCard);
+    btn.disabled = true;
+    btn.textContent = "Synchronisiere…";
+    try {
+      const firestoreMatches = await loadAllMatches();
+      const slotToId = new Map(firestoreMatches.filter(m => m.slot).map(m => [m.slot, m.id]));
+      const koMatches = TOURNAMENT_2026.knockoutMatches;
+      const batch = writeBatch(db);
+      let updated = 0;
+      const skipped = [];
+      for (const km of koMatches) {
+        const firestoreId = slotToId.get(km.slot);
+        if (!firestoreId) { skipped.push(km.slot); continue; }
+        batch.update(doc(db, "matches", firestoreId), { homeRef: km.homeRef || null, awayRef: km.awayRef || null, order: km.order });
+        updated++;
+      }
+      await batch.commit();
+      status.style.color = updated > 0 ? "var(--success, #22a559)" : "var(--error)";
+      status.textContent = `Fertig: ${updated} KO-Spiele aktualisiert.` + (skipped.length ? ` Übersprungen (kein slot-Match in Firestore): ${skipped.join(", ")}` : "");
+      btn.disabled = false;
+      btn.textContent = "KO-Paarungen neu schreiben";
+    } catch (err) {
+      status.style.color = "var(--error)";
+      status.textContent = "Fehler: " + (err.message || err);
+      btn.disabled = false;
+      btn.textContent = "KO-Paarungen neu schreiben";
+    }
+  });
+
   // --- Danger zone ---
   const dangerCard = document.createElement("section");
   dangerCard.className = "card admin-danger-card";
@@ -1507,24 +1403,186 @@ async function finalizeMatch(matchId, homeScore, awayScore, extraPatch = {}) {
   await resolveKnockout();
 }
 
+// ---------- Andere Tipps ----------
+async function loadAndRenderBets(match, myBets, userMap, container) {
+  try {
+    const betsSnap = await getDocs(query(collection(db, "bets"), where("matchId", "==", match.id)));
+    const allBets = betsSnap.docs.map(d => d.data());
+
+    if (allBets.length === 0) {
+      container.innerHTML = `<p style="color:var(--muted);font-size:14px;margin:0">Noch keine Tipps abgegeben.</p>`;
+      return;
+    }
+
+    const myBet = myBets.get(match.id);
+    const otherBets = allBets
+      .filter(b => b.uid !== state.user.uid)
+      .sort((a, b) => {
+        if (match.finished) {
+          const ptsDiff = (b.points ?? -1) - (a.points ?? -1);
+          if (ptsDiff !== 0) return ptsDiff;
+        }
+        return (userMap.get(a.uid)?.name || "").localeCompare(userMap.get(b.uid)?.name || "", "de");
+      });
+
+    const showPts = match.finished;
+
+    function ptsHtml(pts) {
+      if (pts == null) return `<span style="color:var(--muted)">–</span>`;
+      if (pts === 3) return `<span class="tn-pts-3">3</span>`;
+      if (pts === 1) return `<span class="tn-pts-1">1</span>`;
+      return `<span class="tn-pts-0">0</span>`;
+    }
+
+    function betCellHtml(bet) {
+      if (!bet) return `<span style="color:var(--muted)">–</span>`;
+      return `${bet.homeBet} : ${bet.awayBet}`;
+    }
+
+    // Build all row data: current user first, then others
+    const meEntry = { isMe: true, name: state.profile?.name || "Du", bet: myBet };
+    const allRows = [meEntry, ...otherBets.map(b => ({
+      isMe: false,
+      name: userMap.get(b.uid)?.name || b.uid,
+      bet: b,
+    }))];
+
+    function buildTable(rows) {
+      const table = document.createElement("table");
+      table.className = "teilnehmer-table";
+      const thead = document.createElement("thead");
+      thead.innerHTML = `<tr>
+        <th>Name</th>
+        <th style="text-align:center">Tipp</th>
+        ${showPts ? `<th style="text-align:center">Punkte</th>` : ""}
+      </tr>`;
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      for (const row of rows) {
+        const tr = document.createElement("tr");
+        if (row.isMe) tr.className = "tn-me-row";
+        const nameCellHtml = row.isMe
+          ? `${escapeHtml(row.name)}<span class="tn-me-tag">Du</span>`
+          : escapeHtml(row.name);
+        const ptsCellHtml = row.bet ? ptsHtml(row.bet.points) : `<span style="color:var(--muted)">–</span>`;
+        tr.innerHTML = `
+          <td>${nameCellHtml}</td>
+          <td style="text-align:center">${betCellHtml(row.bet)}</td>
+          ${showPts ? `<td style="text-align:center">${ptsCellHtml}</td>` : ""}
+        `;
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      return table;
+    }
+
+    container.innerHTML = "";
+
+    if (allBets.length >= 10) {
+      const mid = Math.ceil(allRows.length / 2);
+      const wrapper = document.createElement("div");
+      wrapper.className = "tn-two-col";
+      wrapper.appendChild(buildTable(allRows.slice(0, mid)));
+      wrapper.appendChild(buildTable(allRows.slice(mid)));
+      container.appendChild(wrapper);
+    } else {
+      container.appendChild(buildTable(allRows));
+    }
+  } catch (err) {
+    container.innerHTML = `<p class="error">Fehler: ${escapeHtml(err.message || String(err))}</p>`;
+  }
+}
+
+function buildTeilnehmerCard(match, myBets, userMap) {
+  const card = document.createElement("div");
+  card.className = "card teilnehmer-card";
+
+  const statusText = match.finished ? "Beendet" : "Läuft";
+  const resultHtml = match.finished && match.homeScore != null
+    ? `<span class="tn-score">${match.homeScore} : ${match.awayScore}</span>`
+    : `<span class="tn-score tn-score-pending">? : ?</span>`;
+
+  const header = document.createElement("button");
+  header.type = "button";
+  header.className = "teilnehmer-card-header";
+  header.innerHTML = `
+    <div class="tn-teams">
+      <span class="tn-team tn-home">${teamLabelHtml(match.homeTeam)}</span>
+      ${resultHtml}
+      <span class="tn-team tn-away">${teamLabelHtml(match.awayTeam)}</span>
+    </div>
+    <div class="tn-right">
+      <span class="tn-meta">${fmtKickoff(match.kickoff)} · ${statusText}</span>
+      <span class="tn-chevron">▾</span>
+    </div>
+  `;
+
+  const body = document.createElement("div");
+  body.className = "teilnehmer-card-body";
+  body.innerHTML = `<p style="color:var(--muted);font-size:14px;margin:0">Lade…</p>`;
+
+  let loaded = false;
+  header.addEventListener("click", async () => {
+    const isOpen = card.classList.toggle("open");
+    if (isOpen && !loaded) {
+      loaded = true;
+      await loadAndRenderBets(match, myBets, userMap, body);
+    }
+  });
+
+  card.appendChild(header);
+  card.appendChild(body);
+  return card;
+}
+
+async function renderTeilnehmer() {
+  const main = $("#app");
+  main.innerHTML = "";
+
+  const [allMatches, usersSnap, myBets] = await Promise.all([
+    loadAllMatches(),
+    getDocs(collection(db, "users")),
+    loadMyBets(),
+  ]);
+
+  const userMap = new Map(usersSnap.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
+
+  const now = Date.now();
+  const startedMatches = allMatches
+    .filter(m => {
+      const ko = m.kickoff.toMillis ? m.kickoff.toMillis() : new Date(m.kickoff).getTime();
+      return ko <= now;
+    })
+    .sort((a, b) => {
+      const ka = a.kickoff.toMillis ? a.kickoff.toMillis() : new Date(a.kickoff).getTime();
+      const kb = b.kickoff.toMillis ? b.kickoff.toMillis() : new Date(b.kickoff).getTime();
+      return kb - ka;
+    });
+
+  if (startedMatches.length === 0) {
+    main.innerHTML = emptyStateHtml(
+      "search",
+      "Noch keine Spiele gestartet",
+      "Hier erscheinen die Tipps aller Teilnehmer, sobald ein Spiel angepfiffen wurde."
+    );
+    return;
+  }
+
+  for (const match of startedMatches) {
+    main.appendChild(buildTeilnehmerCard(match, myBets, userMap));
+  }
+}
+
 // ---------- routing ----------
 const routes = {
   "#spiele": renderSpiele,
   "#turnierbaum": renderTurnierbaum,
-  "#gruppen": renderGruppen,
+  "#teilnehmer": renderTeilnehmer,
   "#admin": renderAdmin,
 };
 
 async function route() {
   if (!state.user) { renderLogin(); return; }
-
-  // Deep-link: #join/CODE — stash code, redirect to #gruppen
-  if (location.hash.startsWith("#join/")) {
-    const code = location.hash.slice(6);
-    sessionStorage.setItem("pendingInviteCode", code);
-    location.hash = "#gruppen";
-    return;
-  }
 
   const hash = routes[location.hash] ? location.hash : "#spiele";
   if (location.hash !== hash) { location.hash = hash; return; }
@@ -1560,18 +1618,6 @@ onAuthStateChanged(auth, async (user) => {
   } else {
     state.profile = snap.data();
   }
-  // Load groups
-  const groupIds = state.profile.groupIds || [];
-  if (groupIds.length > 0) {
-    const groupDocs = await Promise.all(groupIds.map(id => getDoc(doc(db, "groups", id))));
-    state.myGroups = groupDocs.filter(d => d.exists()).map(d => ({ id: d.id, ...d.data() }));
-    const saved = localStorage.getItem("currentGroupId");
-    state.currentGroupId = (saved && state.myGroups.find(g => g.id === saved))
-      ? saved : state.myGroups[0]?.id || null;
-  } else {
-    state.myGroups = [];
-    state.currentGroupId = null;
-  }
 
   document.getElementById("auth-overlay")?.remove();
   document.body.style.overflow = "";
@@ -1579,11 +1625,8 @@ onAuthStateChanged(auth, async (user) => {
   $("#nav").classList.remove("hidden");
   $("#logout-btn").classList.remove("hidden");
   $("#nav-admin").classList.toggle("hidden", !isAdmin());
-  updateGroupChip();
 
-  if (state.currentGroupId === null && location.hash !== "#gruppen") {
-    location.hash = "#gruppen";
-  } else if (!routes[location.hash] && !location.hash.startsWith("#join/")) {
+  if (!routes[location.hash]) {
     location.hash = "#spiele";
   }
   route();
