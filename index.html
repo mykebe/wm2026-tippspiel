@@ -8,14 +8,18 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">WM-Tippspiel</div>
+    <div class="brand">
+      <img src="logo.png" class="nav-logo" alt="Logo" />
+    </div>
     <nav id="nav" class="nav hidden">
-      <a href="#spiele">Spiele</a>
-      <a href="#turnierbaum">Turnierbaum</a>
+      <a href="#spiele">Tipps</a>
+      <a href="#turnierbaum">Tabelle</a>
+      <a href="#gruppen" id="nav-gruppen">Gruppen</a>
       <a href="#admin" id="nav-admin" class="hidden">Admin</a>
     </nav>
     <div id="user-area" class="user-area">
       <span id="user-name"></span>
+      <a href="#gruppen" id="group-chip" class="group-chip hidden"></a>
       <button id="logout-btn" class="link hidden">Abmelden</button>
     </div>
   </header>
@@ -26,34 +30,39 @@
 
   <div id="modal-root"></div>
 
+  <footer class="site-footer">
+    Bei Problemen bitte die Seite neu laden oder
+    <a href="mailto:kevin.belortaja+wm@lebensraeume.at">kevin.belortaja+wm@lebensraeume.at</a>
+    kontaktieren.
+  </footer>
+
   <!-- Login -->
   <template id="tpl-login">
     <div class="auth-split">
       <div class="auth-left">
         <video class="auth-video" src="worldcup.mp4" autoplay muted loop playsinline></video>
         <div class="auth-video-overlay"></div>
-        <img src="logo.png" class="auth-logo" alt="Logo" />
+        <img src="logo_white.png" class="auth-logo" alt="Logo" />
         <h1 class="auth-title">WM-Tippspiel 2026</h1>
-        <p class="auth-sub">Tippe dich zum Sieg</p>
       </div>
       <div class="auth-right">
-        <h2 class="auth-form-title">Willkommen</h2>
+        <h2 class="auth-form-title">Registriere dich und sei der Beste... bei den Lebensräumen ;)</h2>
         <div class="tabs auth-tabs">
-          <button class="tab active" data-mode="login">Anmelden</button>
-          <button class="tab" data-mode="register">Registrieren</button>
+          <button class="tab" data-mode="login">Anmelden</button>
+          <button class="tab active" data-mode="register">Registrieren</button>
         </div>
         <form id="auth-form" class="form">
           <label class="field name-field hidden">
             <span>Name</span>
-            <input name="name" type="text" autocomplete="name" />
+            <input name="name" type="text" placeholder="Dein Name" autocomplete="name" />
           </label>
           <label class="field">
             <span>E-Mail</span>
-            <input name="email" type="email" required autocomplete="email" />
+            <input name="email" type="email" placeholder="Deine Lebensräume-Email" required autocomplete="email" />
           </label>
           <label class="field">
             <span>Passwort</span>
-            <input name="password" type="password" required minlength="6" autocomplete="current-password" />
+            <input name="password" type="password" placeholder="Beliebiges Passwort" minlength="6" autocomplete="current-password" />
           </label>
           <button type="submit" class="primary" style="margin-top:6px">Anmelden</button>
           <p id="auth-error" class="error"></p>

@@ -59,5 +59,27 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }
+
+    // public stats (participantCount) — readable by anyone, including unauthenticated users.
+    match /public/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // betting groups — any signed-in user can read (needed to look up invite codes) and create.
+    // Only the group owner or admin can update/delete the group document.
+    match /groups/{groupId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && (
+        request.auth.uid == resource.data.ownerId || isAdmin()
+      );
+    }
+
+    // group members — any signed-in user can read; each user can write their own membership.
+    match /groups/{groupId}/members/{uid} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+    }
   }
 }
