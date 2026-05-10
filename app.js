@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword,
-  createUserWithEmailAndPassword, signOut
+  createUserWithEmailAndPassword, signOut, sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, setDoc, updateDoc, collection,
@@ -19,7 +19,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 const state = {
-  user: null, profile: null, turnierTab: null, spieleFilter: "7d",
+  user: null, profile: null, turnierTab: null, spieleFilter: "7d", activeGroup: "A", spieleLeftTab: "tabelle", koMobileRound: "R32",
 };
 
 // ---------- helpers ----------
@@ -399,6 +399,56 @@ async function resolveKnockout() {
   await batch.commit();
 }
 
+// ---------- account modal ----------
+async function openAccountModal() {
+  const root = $("#modal-root");
+  root.innerHTML = "";
+  const tpl = $("#tpl-account-modal").content.cloneNode(true);
+  root.appendChild(tpl);
+  const backdrop = $(".modal-backdrop", root);
+  $(".account-email", root).textContent = state.user.email;
+  const errEl = $(".modal-error", root);
+  const okEl = $(".modal-success", root);
+  const resetBtn = $(".reset-pw-btn", root);
+  const cancelBtn = $(".cancel-btn", root);
+  const close = () => { root.innerHTML = ""; };
+  cancelBtn.addEventListener("click", close);
+  backdrop.addEventListener("click", e => { if (e.target === backdrop) close(); });
+
+  (async () => {
+    try {
+      const [allMatches, myBets, usersSnap] = await Promise.all([
+        loadAllMatches(), loadMyBets(), getDocs(collection(db, "users"))
+      ]);
+      const stats = computeMyStats(myBets, allMatches);
+      const ranked = usersSnap.docs
+        .map(d => ({ uid: d.id, points: d.data().totalPoints || 0 }))
+        .sort((a, b) => b.points - a.points);
+      const myRank = ranked.findIndex(u => u.uid === state.user.uid) + 1;
+      $(".account-points", root).textContent = state.profile?.totalPoints ?? 0;
+      $(".account-rank", root).textContent = myRank > 0 ? `${myRank} / ${ranked.length}` : "–";
+      $(".account-completion", root).textContent =
+        `${stats.betsPlaced} / ${stats.betsPossible} (${Math.round(stats.completionRate * 100)}%)`;
+      $(".account-exact", root).textContent = stats.exactHits;
+    } catch (err) {
+      // stats best-effort; password reset still works
+    }
+  })();
+
+  resetBtn.addEventListener("click", async () => {
+    errEl.textContent = ""; okEl.textContent = "";
+    resetBtn.disabled = true;
+    try {
+      await sendPasswordResetEmail(auth, state.user.email);
+      okEl.textContent = "E-Mail wurde gesendet. Bitte prüfe dein Postfach.";
+      resetBtn.classList.add("hidden");
+    } catch (err) {
+      errEl.textContent = "Fehler: " + (err.message || err);
+      resetBtn.disabled = false;
+    }
+  });
+}
+
 // ---------- bet modal ----------
 function openBetModal(match, onSaved) {
   const root = $("#modal-root");
@@ -673,9 +723,40 @@ async function renderSpiele() {
     getDocs(collection(db, "users")),
   ]);
 
-  // Left column: leaderboard + stats
-  await renderLeaderboard(left, { uid: state.user?.uid, snap: usersSnap });
-  renderStatsCard(left, myBets, allMatches, usersSnap);
+  // Left column: tab switcher (mobile only) + leaderboard + stats
+  const leftSwitcher = document.createElement("div");
+  leftSwitcher.className = "spiele-left-switcher";
+  for (const [tab, label] of [["tabelle", "Tabelle"], ["statistiken", "Statistiken"]]) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "spiele-left-tab" + (tab === state.spieleLeftTab ? " active" : "");
+    btn.dataset.tab = tab;
+    btn.textContent = label;
+    leftSwitcher.appendChild(btn);
+  }
+  left.appendChild(leftSwitcher);
+  left.dataset.activeTab = state.spieleLeftTab;
+  leftSwitcher.addEventListener("click", e => {
+    const btn = e.target.closest(".spiele-left-tab");
+    if (!btn) return;
+    state.spieleLeftTab = btn.dataset.tab;
+    left.dataset.activeTab = state.spieleLeftTab;
+    leftSwitcher.querySelectorAll(".spiele-left-tab").forEach(b =>
+      b.classList.toggle("active", b.dataset.tab === state.spieleLeftTab));
+  });
+
+  const tabellePanel = document.createElement("div");
+  tabellePanel.className = "spiele-panel";
+  tabellePanel.dataset.panel = "tabelle";
+  left.appendChild(tabellePanel);
+
+  const statistikenPanel = document.createElement("div");
+  statistikenPanel.className = "spiele-panel";
+  statistikenPanel.dataset.panel = "statistiken";
+  left.appendChild(statistikenPanel);
+
+  await renderLeaderboard(tabellePanel, { uid: state.user?.uid, snap: usersSnap });
+  renderStatsCard(statistikenPanel, myBets, allMatches, usersSnap);
 
   // Right column: heading + filter + matches
   const heading = document.createElement("h1");
@@ -949,14 +1030,40 @@ function renderGruppenTab(container, allMatches, myBets, teamMap) {
     });
   });
 
+  if (!TOURNAMENT_2026.groups.includes(state.activeGroup)) state.activeGroup = TOURNAMENT_2026.groups[0];
+
+  const switcher = document.createElement("div");
+  switcher.className = "group-switcher";
+  for (const g of TOURNAMENT_2026.groups) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "group-chip" + (g === state.activeGroup ? " active" : "");
+    chip.dataset.group = g;
+    chip.textContent = g;
+    switcher.appendChild(chip);
+  }
+  container.appendChild(switcher);
+
   const groupGrid = document.createElement("div");
   groupGrid.className = "group-grid";
+  groupGrid.dataset.activeGroup = state.activeGroup;
   container.appendChild(groupGrid);
+
+  switcher.addEventListener("click", e => {
+    const chip = e.target.closest(".group-chip");
+    if (!chip) return;
+    state.activeGroup = chip.dataset.group;
+    groupGrid.dataset.activeGroup = state.activeGroup;
+    switcher.querySelectorAll(".group-chip").forEach(c =>
+      c.classList.toggle("active", c.dataset.group === state.activeGroup));
+  });
 
   for (const g of TOURNAMENT_2026.groups) {
     const groupMatches = allMatches.filter(m => m.groupId === g).sort((a, b) => a.order - b.order);
     if (groupMatches.length === 0) continue;
     const node = $("#tpl-group-card").content.cloneNode(true);
+    const cardEl = node.querySelector(".group-card");
+    if (cardEl) cardEl.dataset.group = g;
     $(".group-title", node).textContent = `Gruppe ${g}`;
     const tbody = $("tbody", node);
     const standings = computeGroupStandings(g, allMatches, teamMap);
@@ -979,6 +1086,7 @@ function renderGruppenTab(container, allMatches, myBets, teamMap) {
     const matchesContainer = $(".group-matches", node);
     const details = document.createElement("details");
     details.className = "group-matches-details";
+    if (window.innerWidth <= 640) details.open = true;
     const summary = document.createElement("summary");
     summary.textContent = "Spiele anzeigen";
     details.appendChild(summary);
@@ -1054,6 +1162,10 @@ function renderKoTab(container, allMatches, myBets) {
   const center = document.createElement("div");
   center.className = "ko-center";
   if (finalM.length) {
+    const fLabel = document.createElement("div");
+    fLabel.className = "ko-third-label";
+    fLabel.textContent = KO_LABELS["FINAL"];
+    center.appendChild(fLabel);
     const fSlot = document.createElement("div");
     fSlot.className = "ko-final-slot";
     fSlot.appendChild(renderBracketMatch(finalM[0], myBets.get(finalM[0].id), () => route()));
@@ -1080,6 +1192,72 @@ function renderKoTab(container, allMatches, myBets) {
   bracket.appendChild(rightHalf);
 
   container.appendChild(bracket);
+
+  // Mobile KO view — arrow switcher + vertical match list (hidden on desktop via CSS)
+  const MOBILE_KO_ROUNDS = [
+    { id: "R32",    label: KO_LABELS["R32"] },
+    { id: "R16",    label: KO_LABELS["R16"] },
+    { id: "QF",     label: KO_LABELS["QF"] },
+    { id: "SF",     label: KO_LABELS["SF"] },
+    { id: "FINALS", label: "Finale & Platz 3" },
+  ];
+  if (!MOBILE_KO_ROUNDS.find(r => r.id === state.koMobileRound)) state.koMobileRound = "R32";
+
+  const mobileView = document.createElement("div");
+  mobileView.className = "ko-mobile-view";
+
+  const mobileSwitcher = document.createElement("div");
+  mobileSwitcher.className = "ko-mobile-switcher";
+
+  const prevBtn = document.createElement("button");
+  prevBtn.type = "button";
+  prevBtn.className = "ko-mobile-arrow";
+  prevBtn.innerHTML = "&#8592;";
+  prevBtn.setAttribute("aria-label", "Vorherige Runde");
+
+  const roundLabel = document.createElement("span");
+  roundLabel.className = "ko-mobile-label";
+
+  const nextBtn = document.createElement("button");
+  nextBtn.type = "button";
+  nextBtn.className = "ko-mobile-arrow";
+  nextBtn.innerHTML = "&#8594;";
+  nextBtn.setAttribute("aria-label", "Nächste Runde");
+
+  mobileSwitcher.append(prevBtn, roundLabel, nextBtn);
+
+  const mobileList = document.createElement("div");
+  mobileList.className = "ko-mobile-list";
+
+  mobileView.append(mobileSwitcher, mobileList);
+  container.appendChild(mobileView);
+
+  function getMobileKoMatches(id) {
+    if (id === "FINALS") return [...thirdM, ...finalM];
+    return getStageSorted(id);
+  }
+
+  function updateMobileKoView() {
+    const idx = MOBILE_KO_ROUNDS.findIndex(r => r.id === state.koMobileRound);
+    roundLabel.textContent = MOBILE_KO_ROUNDS[idx].label;
+    prevBtn.disabled = idx === 0;
+    nextBtn.disabled = idx === MOBILE_KO_ROUNDS.length - 1;
+    mobileList.innerHTML = "";
+    for (const m of getMobileKoMatches(state.koMobileRound)) {
+      mobileList.appendChild(renderBracketMatch(m, myBets.get(m.id), () => route()));
+    }
+  }
+
+  prevBtn.addEventListener("click", () => {
+    const idx = MOBILE_KO_ROUNDS.findIndex(r => r.id === state.koMobileRound);
+    if (idx > 0) { state.koMobileRound = MOBILE_KO_ROUNDS[idx - 1].id; updateMobileKoView(); }
+  });
+  nextBtn.addEventListener("click", () => {
+    const idx = MOBILE_KO_ROUNDS.findIndex(r => r.id === state.koMobileRound);
+    if (idx < MOBILE_KO_ROUNDS.length - 1) { state.koMobileRound = MOBILE_KO_ROUNDS[idx + 1].id; updateMobileKoView(); }
+  });
+
+  updateMobileKoView();
 }
 
 // ---------- admin ----------
@@ -1606,7 +1784,12 @@ onAuthStateChanged(auth, async (user) => {
   if (!user) {
     $("#nav").classList.add("hidden");
     $("#logout-btn").classList.add("hidden");
+    $("#account-btn").classList.add("hidden");
     $("#user-name").textContent = "";
+    $("#burger-btn").classList.add("hidden");
+    $("#burger-menu").classList.add("hidden");
+    $("#burger-admin").classList.add("hidden");
+    $("#burger-name").textContent = "";
     renderLogin();
     return;
   }
@@ -1624,7 +1807,11 @@ onAuthStateChanged(auth, async (user) => {
   $("#user-name").textContent = state.profile.name;
   $("#nav").classList.remove("hidden");
   $("#logout-btn").classList.remove("hidden");
+  $("#account-btn").classList.remove("hidden");
   $("#nav-admin").classList.toggle("hidden", !isAdmin());
+  $("#burger-btn").classList.remove("hidden");
+  $("#burger-name").textContent = state.profile.name + " / Konto";
+  $("#burger-admin").classList.toggle("hidden", !isAdmin());
 
   if (!routes[location.hash]) {
     location.hash = "#spiele";
@@ -1633,3 +1820,26 @@ onAuthStateChanged(auth, async (user) => {
 });
 
 $("#logout-btn").addEventListener("click", () => signOut(auth));
+$("#account-btn").addEventListener("click", openAccountModal);
+$("#burger-name").addEventListener("click", () => {
+  $("#burger-menu").classList.add("hidden");
+  openAccountModal();
+});
+$("#burger-logout").addEventListener("click", () => {
+  $("#burger-menu").classList.add("hidden");
+  signOut(auth);
+});
+$("#burger-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  $("#burger-menu").classList.toggle("hidden");
+});
+$("#burger-menu").addEventListener("click", (e) => {
+  if (e.target.tagName === "A") $("#burger-menu").classList.add("hidden");
+});
+document.addEventListener("click", (e) => {
+  const menu = $("#burger-menu");
+  const btn = $("#burger-btn");
+  if (menu.classList.contains("hidden")) return;
+  if (menu.contains(e.target) || btn.contains(e.target)) return;
+  menu.classList.add("hidden");
+});

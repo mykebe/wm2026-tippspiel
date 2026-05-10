@@ -18,8 +18,19 @@
       <a href="#admin" id="nav-admin" class="hidden">Admin</a>
     </nav>
     <div id="user-area" class="user-area">
-      <span id="user-name"></span>
+      <button id="account-btn" class="account-trigger hidden" aria-label="Account-Einstellungen">
+        <span id="user-name"></span>
+        <span class="account-gear">⚙</span>
+      </button>
       <button id="logout-btn" class="link hidden">Abmelden</button>
+    </div>
+    <button id="burger-btn" class="burger hidden" aria-label="Menü öffnen">
+      <span></span><span></span><span></span>
+    </button>
+    <div id="burger-menu" class="burger-menu hidden">
+      <a href="#admin" id="burger-admin" class="hidden">Admin</a>
+      <button id="burger-name" class="burger-name">Mein Account</button>
+      <button id="burger-logout" class="link">Abmelden</button>
     </div>
   </header>
 
@@ -128,6 +139,30 @@
         <div class="modal-actions">
           <button type="button" class="link cancel-btn">Abbrechen</button>
           <button type="button" class="primary save-btn">Tipp speichern</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- Account-Modal -->
+  <template id="tpl-account-modal">
+    <div class="modal-backdrop">
+      <div class="modal card">
+        <h2 class="modal-title">Mein Account</h2>
+        <p class="modal-meta account-email"></p>
+        <div class="account-stats">
+          <div class="account-stat"><span class="account-stat-label">Punkte</span><span class="account-stat-value account-points">–</span></div>
+          <div class="account-stat"><span class="account-stat-label">Rang</span><span class="account-stat-value account-rank">–</span></div>
+          <div class="account-stat"><span class="account-stat-label">Tipps abgegeben</span><span class="account-stat-value account-completion">–</span></div>
+          <div class="account-stat"><span class="account-stat-label">Volltreffer</span><span class="account-stat-value account-exact">–</span></div>
+        </div>
+        <hr class="account-divider" />
+        <p class="modal-meta">Passwort vergessen? Wir senden dir einen Reset-Link per E-Mail.</p>
+        <p class="error modal-error"></p>
+        <p class="success modal-success"></p>
+        <div class="modal-actions">
+          <button type="button" class="link cancel-btn">Schließen</button>
+          <button type="button" class="primary reset-pw-btn">Passwort zurücksetzen</button>
         </div>
       </div>
     </div>
