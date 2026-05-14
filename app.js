@@ -4,11 +4,12 @@ import {
   createUserWithEmailAndPassword, signOut, sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import {
-  getFirestore, doc, getDoc, setDoc, updateDoc, collection,
-  query, where, orderBy, getDocs, Timestamp, writeBatch, increment
+  getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection,
+  query, where, orderBy, getDocs, Timestamp, writeBatch, increment, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
 
 import { firebaseConfig, ADMIN_EMAIL } from "./firebase-config.js";
+import { POOL_ID, BRANDING } from "./pool-config.js";
 import { TOURNAMENT_2026, KO_ORDER, KO_LABELS, refLabel } from "./tournament-2026.js";
 
 const app = initializeApp(firebaseConfig);
@@ -18,9 +19,29 @@ const db = getFirestore(app);
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
+// Apply per-pool branding to header + page title before first render.
+document.title = BRANDING.title;
+const navLogoEl = document.getElementById("nav-logo");
+if (navLogoEl) navLogoEl.src = BRANDING.logo;
+
+// `<base href="/">` makes hash-only links resolve to "/#hash", which would
+// drop the /family path prefix on navigation. Intercept those clicks and
+// update only the hash so the pool context is preserved.
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("a[href^='#']");
+  if (!a) return;
+  e.preventDefault();
+  const href = a.getAttribute("href");
+  if (href && href !== "#") location.hash = href;
+});
+
 const state = {
   user: null, profile: null, turnierTab: null, spieleFilter: "7d", activeGroup: "A", spieleLeftTab: "tabelle", koMobileRound: "R32",
 };
+
+// Set when the register form is submitted so onAuthStateChanged knows to create a profile.
+// Null at all other times — prevents cross-pool auto-login.
+let pendingRegistration = null;
 
 // ---------- helpers ----------
 const fmtKickoff = (ts) => {
@@ -129,18 +150,18 @@ function friendlyError(err) {
 
 // ---------- data loading ----------
 async function loadTournamentConfig() {
-  const snap = await getDoc(doc(db, "tournament", "config"));
+  const snap = await getDoc(doc(db, "pools", POOL_ID, "tournament", "config"));
   return snap.exists() ? snap.data() : { teams: {}, seeded: false };
 }
 
 async function loadAllMatches() {
-  const snap = await getDocs(query(collection(db, "matches"), orderBy("order", "asc")));
+  const snap = await getDocs(query(collection(db, "pools", POOL_ID, "matches"), orderBy("order", "asc")));
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
 async function loadMyBets() {
   if (!state.user) return new Map();
-  const snap = await getDocs(query(collection(db, "bets"), where("uid", "==", state.user.uid)));
+  const snap = await getDocs(query(collection(db, "pools", POOL_ID, "bets"), where("uid", "==", state.user.uid)));
   const m = new Map();
   snap.docs.forEach(d => m.set(d.data().matchId, d.data()));
   return m;
@@ -155,6 +176,12 @@ function renderLogin() {
   document.body.style.overflow = "hidden";
   document.body.appendChild(overlay);
   overlay.appendChild($("#tpl-login").content.cloneNode(true));
+  const authLogo = overlay.querySelector(".auth-logo");
+  if (authLogo) authLogo.src = BRANDING.logoWhite;
+  const authTitle = overlay.querySelector(".auth-title");
+  if (authTitle) authTitle.textContent = BRANDING.authTitle;
+  const authFormTitle = overlay.querySelector(".auth-form-title");
+  if (authFormTitle) authFormTitle.textContent = BRANDING.authSubtitle;
   let mode = "register";
   const form = overlay.querySelector("#auth-form");
   const submit = form.querySelector("button[type=submit]");
@@ -195,7 +222,7 @@ function renderLogin() {
   `;
   overlay.querySelector(".auth-right").appendChild(infoSection);
 
-  getDoc(doc(db, "public", "stats")).then(snap => {
+  getDoc(doc(db, "pools", POOL_ID, "stats", "public")).then(snap => {
     const count = snap.exists() ? (snap.data().participantCount || 0) : 0;
     overlay.querySelector(".auth-prize-amount").textContent = `${count * 5} €`;
   }).catch(() => {
@@ -215,9 +242,13 @@ function renderLogin() {
         await signInWithEmailAndPassword(auth, email, password);
       } else {
         if (!name) throw new Error("Bitte Name angeben.");
-        const cred = await createUserWithEmailAndPassword(auth, email, password);
-        await setDoc(doc(db, "users", cred.user.uid), { name, email, totalPoints: 0 });
-        await setDoc(doc(db, "public", "stats"), { participantCount: increment(1) }, { merge: true });
+        pendingRegistration = { name, email };
+        try {
+          await createUserWithEmailAndPassword(auth, email, password);
+        } catch (err) {
+          pendingRegistration = null;
+          throw err;
+        }
       }
     } catch (err) {
       errEl.textContent = friendlyError(err);
@@ -232,7 +263,7 @@ async function renderLeaderboard(targetEl, { limit = 5, title = "Tabelle – Top
   const node = $("#tpl-leaderboard").content.cloneNode(true);
   $("h2", node).textContent = title;
   const ol = $(".leaderboard", node);
-  if (!snap) snap = await getDocs(collection(db, "users"));
+  if (!snap) snap = await getDocs(collection(db, "pools", POOL_ID, "users"));
   const allUsers = snap.docs.map(d => ({ id: d.id, ...d.data() }))
     .sort((a, b) => (b.totalPoints || 0) - (a.totalPoints || 0));
   const users = allUsers.slice(0, limit);
@@ -356,10 +387,11 @@ function resolveRef(ref, allMatches, teamMap) {
   return null;
 }
 
-async function resolveKnockout() {
-  const allMatches = await loadAllMatches();
-  const cfg = await loadTournamentConfig();
-  const teamMap = cfg.teams || {};
+async function resolveKnockout(poolId = POOL_ID) {
+  const matchesSnap = await getDocs(query(collection(db, "pools", poolId, "matches"), orderBy("order", "asc")));
+  const allMatches = matchesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const cfgSnap = await getDoc(doc(db, "pools", poolId, "tournament", "config"));
+  const teamMap = cfgSnap.exists() ? (cfgSnap.data().teams || {}) : {};
 
   // Iteriere mehrfach, weil später Runden von früheren abhängen
   let changed = true;
@@ -394,7 +426,7 @@ async function resolveKnockout() {
   if (updates.size === 0) return;
   const batch = writeBatch(db);
   for (const [id, patch] of updates) {
-    batch.update(doc(db, "matches", id), patch);
+    batch.update(doc(db, "pools", poolId, "matches", id), patch);
   }
   await batch.commit();
 }
@@ -418,7 +450,7 @@ async function openAccountModal() {
   (async () => {
     try {
       const [allMatches, myBets, usersSnap] = await Promise.all([
-        loadAllMatches(), loadMyBets(), getDocs(collection(db, "users"))
+        loadAllMatches(), loadMyBets(), getDocs(collection(db, "pools", POOL_ID, "users"))
       ]);
       const stats = computeMyStats(myBets, allMatches);
       const ranked = usersSnap.docs
@@ -449,6 +481,46 @@ async function openAccountModal() {
   });
 }
 
+// ---------- feedback modal ----------
+function openFeedbackModal() {
+  const root = $("#modal-root");
+  root.innerHTML = "";
+  const tpl = $("#tpl-feedback-modal").content.cloneNode(true);
+  root.appendChild(tpl);
+  const backdrop = $(".modal-backdrop", root);
+  const msgEl = $(".feedback-message", root);
+  const errEl = $(".modal-error", root);
+  const okEl = $(".modal-success", root);
+  const sendBtn = $(".send-btn", root);
+  const cancelBtn = $(".cancel-btn", root);
+  const close = () => { root.innerHTML = ""; };
+  cancelBtn.addEventListener("click", close);
+  backdrop.addEventListener("click", e => { if (e.target === backdrop) close(); });
+  setTimeout(() => msgEl.focus(), 0);
+
+  sendBtn.addEventListener("click", async () => {
+    errEl.textContent = ""; okEl.textContent = "";
+    const message = msgEl.value.trim();
+    if (!message) { errEl.textContent = "Bitte gib eine Nachricht ein."; return; }
+    sendBtn.disabled = true;
+    try {
+      await addDoc(collection(db, "feedback"), {
+        uid: state.user?.uid || null,
+        name: state.profile?.name || "Unbekannt",
+        email: state.user?.email || "Unbekannt",
+        pool: POOL_ID,
+        message,
+        createdAt: serverTimestamp()
+      });
+      okEl.textContent = "Nachricht gesendet. Vielen Dank!";
+      setTimeout(close, 1200);
+    } catch (err) {
+      errEl.textContent = "Fehler beim Senden: " + (err.message || err);
+      sendBtn.disabled = false;
+    }
+  });
+}
+
 // ---------- bet modal ----------
 function openBetModal(match, onSaved) {
   const root = $("#modal-root");
@@ -466,7 +538,7 @@ function openBetModal(match, onSaved) {
   const cancelBtn = $(".cancel-btn", root);
 
   // existierenden Tipp laden
-  const betRef = doc(db, "bets", `${match.id}_${state.user.uid}`);
+  const betRef = doc(db, "pools", POOL_ID, "bets", `${match.id}_${state.user.uid}`);
   getDoc(betRef).then(snap => {
     if (snap.exists()) { hi.value = snap.data().homeBet; ai.value = snap.data().awayBet; }
   });
@@ -720,7 +792,7 @@ async function renderSpiele() {
   const [allMatches, myBets, usersSnap] = await Promise.all([
     loadAllMatches(),
     loadMyBets(),
-    getDocs(collection(db, "users")),
+    getDocs(collection(db, "pools", POOL_ID, "users")),
   ]);
 
   // Left column: tab switcher (mobile only) + leaderboard + stats
@@ -908,7 +980,7 @@ async function renderSpiele() {
   drawer.appendChild(inner);
   document.body.appendChild(drawer);
 
-  getDoc(doc(db, "public", "stats")).then(snap => {
+  getDoc(doc(db, "pools", POOL_ID, "stats", "public")).then(snap => {
     const count = snap.exists() ? (snap.data().participantCount || 0) : 0;
     const el = drawer.querySelector(".rules-prize");
     if (el) el.textContent = `${count * 5} €`;
@@ -1261,6 +1333,158 @@ function renderKoTab(container, allMatches, myBets) {
 }
 
 // ---------- admin ----------
+async function renderFeedbackSection(main) {
+  const card = document.createElement("section");
+  card.className = "card";
+  card.style.marginBottom = "14px";
+
+  const header = document.createElement("button");
+  header.className = "link";
+  header.style.cssText = "display:flex;align-items:center;justify-content:space-between;width:100%;font-size:16px;font-weight:700;padding:0";
+  const headerLabel = document.createElement("span");
+  const headerIcon = document.createElement("span");
+  headerIcon.textContent = "▾";
+  header.appendChild(headerLabel);
+  header.appendChild(headerIcon);
+
+  const body = document.createElement("div");
+  body.style.cssText = "margin-top:14px;display:none";
+
+  card.appendChild(header);
+  card.appendChild(body);
+  main.appendChild(card);
+
+  let items = [];
+  try {
+    const snap = await getDocs(query(collection(db, "feedback"), orderBy("createdAt", "desc")));
+    items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    headerLabel.textContent = "Feedback (Fehler beim Laden)";
+    return;
+  }
+
+  function updateHeader() {
+    if (items.length === 0) { headerLabel.textContent = "Feedback (0)"; return; }
+    const counts = items.reduce((acc, it) => { acc[it.pool || "?"] = (acc[it.pool || "?"] || 0) + 1; return acc; }, {});
+    const breakdown = Object.entries(counts).map(([k, v]) => `${k}: ${v}`).join(", ");
+    headerLabel.textContent = `Feedback (${items.length} gesamt — ${breakdown})`;
+  }
+  updateHeader();
+
+  function render() {
+    body.innerHTML = "";
+    if (items.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "modal-meta";
+      empty.style.margin = "0";
+      empty.textContent = "Noch keine Nachrichten.";
+      body.appendChild(empty);
+      return;
+    }
+    for (const item of items) {
+      const row = document.createElement("div");
+      row.className = "feedback-item";
+      const when = item.createdAt?.toDate ? item.createdAt.toDate() : null;
+      const whenStr = when ? when.toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" }) : "–";
+      const meta = document.createElement("div");
+      meta.className = "feedback-meta";
+      meta.innerHTML = `<span class="feedback-pool-badge"></span> <strong></strong> <span class="feedback-email"></span> <span class="feedback-when"></span>`;
+      const badge = meta.querySelector(".feedback-pool-badge");
+      badge.textContent = item.pool || "?";
+      badge.dataset.pool = item.pool || "?";
+      meta.querySelector("strong").textContent = item.name || "Unbekannt";
+      meta.querySelector(".feedback-email").textContent = item.email || "";
+      meta.querySelector(".feedback-when").textContent = whenStr;
+      const msg = document.createElement("div");
+      msg.className = "feedback-message-text";
+      msg.textContent = item.message || "";
+      const actions = document.createElement("div");
+      actions.className = "feedback-actions";
+      const delBtn = document.createElement("button");
+      delBtn.className = "link";
+      delBtn.textContent = "Löschen";
+      delBtn.addEventListener("click", async () => {
+        if (!confirm("Diese Nachricht löschen?")) return;
+        delBtn.disabled = true;
+        try {
+          await deleteDoc(doc(db, "feedback", item.id));
+          items = items.filter(i => i.id !== item.id);
+          updateHeader();
+          render();
+        } catch (err) {
+          alert("Fehler: " + (err.message || err));
+          delBtn.disabled = false;
+        }
+      });
+      actions.appendChild(delBtn);
+      row.appendChild(meta);
+      row.appendChild(msg);
+      row.appendChild(actions);
+      body.appendChild(row);
+    }
+  }
+  render();
+
+  header.addEventListener("click", () => {
+    const isOpen = body.style.display === "none";
+    body.style.display = isOpen ? "" : "none";
+    headerIcon.textContent = isOpen ? "▴" : "▾";
+  });
+}
+
+
+function renderDeleteUsersSection(main) {
+  const card = document.createElement("section");
+  card.className = "card";
+  card.style.cssText = "margin-bottom:14px;border:1px solid var(--error)";
+  card.innerHTML = `
+    <h2 style="color:var(--error)">Nutzer löschen</h2>
+    <p style="color:var(--muted);font-size:13px;margin-top:0">
+      Löscht alle Nutzerprofile und Tipps aus <strong>beiden Pools</strong>, außer dem Admin-Account. Firebase-Auth-Konten müssen danach manuell in der Firebase Console gelöscht werden.
+    </p>
+    <button class="primary del-users-btn" style="background:var(--error)">Alle Nicht-Admin-Nutzer löschen</button>
+    <p class="del-users-status" style="margin-top:8px;font-size:13px;white-space:pre-wrap"></p>
+  `;
+  main.appendChild(card);
+
+  $(".del-users-btn", card).addEventListener("click", async () => {
+    if (!confirm("Wirklich ALLE Nutzer (außer Admin) und deren Tipps aus beiden Pools löschen? Das kann nicht rückgängig gemacht werden!")) return;
+    const btn = $(".del-users-btn", card);
+    const status = $(".del-users-status", card);
+    btn.disabled = true;
+    status.textContent = "Lösche…";
+    try {
+      let totalUsers = 0, totalBets = 0;
+      for (const poolId of ["work", "family"]) {
+        const usersSnap = await getDocs(collection(db, "pools", poolId, "users"));
+        const nonAdminDocs = usersSnap.docs.filter(d => d.data().email !== ADMIN_EMAIL);
+        const nonAdminUids = new Set(nonAdminDocs.map(d => d.id));
+
+        const betsSnap = await getDocs(collection(db, "pools", poolId, "bets"));
+        const betDocs = betsSnap.docs.filter(d => nonAdminUids.has(d.data().uid));
+
+        const toDelete = [...nonAdminDocs, ...betDocs];
+        for (let i = 0; i < toDelete.length; i += 490) {
+          const batch = writeBatch(db);
+          toDelete.slice(i, i + 490).forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+        totalUsers += nonAdminDocs.length;
+        totalBets += betDocs.length;
+        const remaining = usersSnap.docs.length - nonAdminDocs.length;
+        await setDoc(doc(db, "pools", poolId, "stats", "public"), { participantCount: remaining }, { merge: true });
+      }
+      status.style.color = "green";
+      status.textContent = `Gelöscht: ${totalUsers} Nutzerprofile, ${totalBets} Tipps.\nFirebase-Auth-Konten bitte manuell in der Firebase Console löschen.`;
+      btn.disabled = false;
+    } catch (err) {
+      status.style.color = "var(--error)";
+      status.textContent = "Fehler: " + (err.message || err);
+      btn.disabled = false;
+    }
+  });
+}
+
 async function renderAdmin() {
   if (!isAdmin()) { location.hash = "#spiele"; return; }
   const main = $("#app");
@@ -1268,9 +1492,9 @@ async function renderAdmin() {
   main.innerHTML = `<h1>Admin</h1>`;
 
   // --- Collapsible user scores table ---
-  const usersSnap = await getDocs(collection(db, "users"));
+  const usersSnap = await getDocs(collection(db, "pools", POOL_ID, "users"));
   const userCount = usersSnap.docs.length;
-  try { await setDoc(doc(db, "public", "stats"), { participantCount: userCount }, { merge: true }); } catch (_) {}
+  try { await setDoc(doc(db, "pools", POOL_ID, "stats", "public"), { participantCount: userCount }, { merge: true }); } catch (_) {}
 
   const usersCard = document.createElement("section");
   usersCard.className = "card";
@@ -1294,6 +1518,8 @@ async function renderAdmin() {
   usersCard.appendChild(usersHeader);
   usersCard.appendChild(usersBody);
   main.appendChild(usersCard);
+
+  await renderFeedbackSection(main);
 
   const allMatches = await loadAllMatches();
 
@@ -1362,7 +1588,7 @@ async function renderAdmin() {
           patch.awaySlot = m.homeSlot || null;
         }
         if (Object.keys(patch).length) {
-          await updateDoc(doc(db, "matches", m.id), patch);
+          await updateDoc(doc(db, "pools", POOL_ID, "matches", m.id), patch);
         }
         renderAdmin();
       } catch (err) {
@@ -1384,7 +1610,7 @@ async function renderAdmin() {
           await finalizeMatch(m.id, h, a, patch);
         } else {
           if (Object.keys(patch).length > 0) {
-            await updateDoc(doc(db, "matches", m.id), patch);
+            await updateDoc(doc(db, "pools", POOL_ID, "matches", m.id), patch);
           }
         }
         renderAdmin();
@@ -1464,7 +1690,7 @@ async function renderAdmin() {
       for (const km of koMatches) {
         const firestoreId = slotToId.get(km.slot);
         if (!firestoreId) { skipped.push(km.slot); continue; }
-        batch.update(doc(db, "matches", firestoreId), { homeRef: km.homeRef || null, awayRef: km.awayRef || null, order: km.order });
+        batch.update(doc(db, "pools", POOL_ID, "matches", firestoreId), { homeRef: km.homeRef || null, awayRef: km.awayRef || null, order: km.order });
         updated++;
       }
       await batch.commit();
@@ -1510,81 +1736,84 @@ async function renderAdmin() {
       btn.textContent = "Alle Ergebnisse zurücksetzen";
     }
   });
+
+  renderDeleteUsersSection(main);
 }
 
-
-
 async function resetAllResults() {
-  const [matchesSnap, betsSnap, usersSnap] = await Promise.all([
-    getDocs(collection(db, "matches")),
-    getDocs(collection(db, "bets")),
-    getDocs(collection(db, "users")),
-  ]);
-
   const BATCH_LIMIT = 490;
   let batch = writeBatch(db);
   let ops = 0;
-
   const flush = async () => { await batch.commit(); batch = writeBatch(db); ops = 0; };
 
-  for (const d of matchesSnap.docs) {
-    batch.update(d.ref, { homeScore: null, awayScore: null, finished: false });
-    if (++ops >= BATCH_LIMIT) await flush();
-  }
-  for (const d of betsSnap.docs) {
-    batch.update(d.ref, { points: null });
-    if (++ops >= BATCH_LIMIT) await flush();
-  }
-  for (const d of usersSnap.docs) {
-    batch.update(d.ref, {
-      totalPoints: 0,
-      recentScores: [],
-    });
-    if (++ops >= BATCH_LIMIT) await flush();
+  for (const poolId of ["work", "family"]) {
+    const [matchesSnap, betsSnap, usersSnap] = await Promise.all([
+      getDocs(collection(db, "pools", poolId, "matches")),
+      getDocs(collection(db, "pools", poolId, "bets")),
+      getDocs(collection(db, "pools", poolId, "users")),
+    ]);
+    for (const d of matchesSnap.docs) {
+      batch.update(d.ref, { homeScore: null, awayScore: null, finished: false });
+      if (++ops >= BATCH_LIMIT) await flush();
+    }
+    for (const d of betsSnap.docs) {
+      batch.update(d.ref, { points: null });
+      if (++ops >= BATCH_LIMIT) await flush();
+    }
+    for (const d of usersSnap.docs) {
+      batch.update(d.ref, { totalPoints: 0, recentScores: [] });
+      if (++ops >= BATCH_LIMIT) await flush();
+    }
   }
   if (ops > 0) await batch.commit();
 }
 
 async function finalizeMatch(matchId, homeScore, awayScore, extraPatch = {}) {
-  const matchRef = doc(db, "matches", matchId);
-  await updateDoc(matchRef, { ...extraPatch, homeScore, awayScore, finished: true });
+  for (const poolId of ["work", "family"]) {
+    const matchRef = doc(db, "pools", poolId, "matches", matchId);
+    const matchSnap = await getDoc(matchRef);
+    if (!matchSnap.exists()) continue;
 
-  // Punkte vergeben
-  const betsSnap = await getDocs(query(collection(db, "bets"), where("matchId", "==", matchId)));
-  if (!betsSnap.empty) {
-    const matchData = { homeScore, awayScore };
-    const scoredBets = betsSnap.docs.map(b => ({ ref: b.ref, bet: b.data(), pts: scoreBet(b.data(), matchData) }));
-    const userSnaps = await Promise.all(
-      scoredBets.map(s => getDoc(doc(db, "users", s.bet.uid)))
-    );
+    await updateDoc(matchRef, { ...extraPatch, homeScore, awayScore, finished: true });
 
-    const now = new Date();
-    const batch = writeBatch(db);
-    scoredBets.forEach((s, i) => {
-      batch.update(s.ref, { points: s.pts });
-      const userRef = userSnaps[i].ref;
-      const u = userSnaps[i].exists() ? userSnaps[i].data() : {};
-      const userPatch = {};
-      if (s.pts > 0) {
-        userPatch.totalPoints = increment(s.pts);
-        const recent = Array.isArray(u.recentScores) ? u.recentScores : [];
-        userPatch.recentScores = [...recent, { ts: now, pts: s.pts }];
-      }
-      if (Object.keys(userPatch).length > 0) {
-        batch.update(userRef, userPatch);
-      }
-    });
-    await batch.commit();
+    // Punkte vergeben
+    const betsSnap = await getDocs(query(collection(db, "pools", poolId, "bets"), where("matchId", "==", matchId)));
+    if (!betsSnap.empty) {
+      const matchData = { homeScore, awayScore };
+      const scoredBets = betsSnap.docs.map(b => ({ ref: b.ref, bet: b.data(), pts: scoreBet(b.data(), matchData) }));
+      const userSnaps = await Promise.all(
+        scoredBets.map(s => getDoc(doc(db, "pools", poolId, "users", s.bet.uid)))
+      );
+
+      const now = new Date();
+      const batch = writeBatch(db);
+      scoredBets.forEach((s, i) => {
+        batch.update(s.ref, { points: s.pts });
+        const userRef = userSnaps[i].ref;
+        const u = userSnaps[i].exists() ? userSnaps[i].data() : {};
+        const userPatch = {};
+        if (s.pts > 0) {
+          userPatch.totalPoints = increment(s.pts);
+          const recent = Array.isArray(u.recentScores) ? u.recentScores : [];
+          userPatch.recentScores = [...recent, { ts: now, pts: s.pts }];
+        }
+        if (Object.keys(userPatch).length > 0) {
+          batch.update(userRef, userPatch);
+        }
+      });
+      await batch.commit();
+    }
   }
 
-  // KO-Folgespiele auflösen
-  await resolveKnockout();
+  // KO-Folgespiele auflösen für beide Pools
+  await resolveKnockout("work");
+  await resolveKnockout("family");
 }
 
 // ---------- Andere Tipps ----------
 async function loadAndRenderBets(match, myBets, userMap, container) {
   try {
-    const betsSnap = await getDocs(query(collection(db, "bets"), where("matchId", "==", match.id)));
+    const betsSnap = await getDocs(query(collection(db, "pools", POOL_ID, "bets"), where("matchId", "==", match.id)));
     const allBets = betsSnap.docs.map(d => d.data());
 
     if (allBets.length === 0) {
@@ -1719,7 +1948,7 @@ async function renderTeilnehmer() {
 
   const [allMatches, usersSnap, myBets] = await Promise.all([
     loadAllMatches(),
-    getDocs(collection(db, "users")),
+    getDocs(collection(db, "pools", POOL_ID, "users")),
     loadMyBets(),
   ]);
 
@@ -1793,11 +2022,22 @@ onAuthStateChanged(auth, async (user) => {
     renderLogin();
     return;
   }
-  const ref = doc(db, "users", user.uid);
+  const ref = doc(db, "pools", POOL_ID, "users", user.uid);
   const snap = await getDoc(ref);
   if (!snap.exists()) {
-    await setDoc(ref, { name: user.email, email: user.email, totalPoints: 0 });
-    state.profile = { name: user.email, email: user.email, totalPoints: 0 };
+    const reg = pendingRegistration;
+    pendingRegistration = null;
+    if (reg || user.email === ADMIN_EMAIL) {
+      const name = reg ? reg.name : user.email;
+      const email = reg ? reg.email : user.email;
+      await setDoc(ref, { name, email, totalPoints: 0 });
+      await setDoc(doc(db, "pools", POOL_ID, "stats", "public"), { participantCount: increment(1) }, { merge: true });
+      state.profile = { name, email, totalPoints: 0 };
+    } else {
+      // Authenticated user has no profile in this pool — sign out to prevent cross-pool access.
+      await signOut(auth);
+      return;
+    }
   } else {
     state.profile = snap.data();
   }
@@ -1819,6 +2059,7 @@ onAuthStateChanged(auth, async (user) => {
   route();
 });
 
+$("#feedback-link").addEventListener("click", openFeedbackModal);
 $("#logout-btn").addEventListener("click", () => signOut(auth));
 $("#account-btn").addEventListener("click", openAccountModal);
 $("#burger-name").addEventListener("click", () => {

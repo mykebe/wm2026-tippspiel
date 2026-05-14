@@ -12,10 +12,19 @@ Then open `http://localhost:8000`. There is no npm, no bundler, no build step �
 
 **Single-file SPA** — `index.html` holds `<template>` tags for all views; `app.js` clones and renders them via the DOM. Three views: Spiele (matches + leaderboard), Turnierbaum (bracket), Admin.
 
+**Two parallel pools** (work + family) on a single Firebase project:
+- Pool selected at runtime from `location.pathname` in [pool-config.js](pool-config.js): `/family*` → `family`, anything else → `work`. Existing bookmarks at `/` keep working as the work pool.
+- Each deploy reads/writes only its own slice of Firestore via `pools/{POOL_ID}/...` paths.
+- Branding (page title, header logo, auth-screen logo + headings) is swapped client-side on boot from `POOL_BRANDING` in [pool-config.js](pool-config.js).
+- `<base href="/">` in [index.html](index.html) keeps relative asset URLs resolving from root regardless of which path the SPA was loaded from.
+- Same Firebase Auth UID can have an independent profile in each pool (separate doc under `pools/{poolId}/users/{uid}`).
+- Cross-pool isolation is client-side only — Firestore rules don't enforce it. Trusted-user model.
+
 **Firebase backend:**
 - Auth: email/password; admin identity is the email in `firebase-config.js`
-- Firestore collections: `users`, `matches`, `bets`, `tournament`
-- Security rules in `firestore.rules` — bets are time-locked at kickoff
+- Pool-scoped Firestore subcollections: `pools/{poolId}/{users, matches, bets, tournament, stats}`
+- Shared collections (top-level): `feedback` (each doc carries a `pool` field so admin can tell them apart)
+- Security rules in `firestore.rules` — bets are time-locked at kickoff; legacy top-level collections are read-only-by-admin during migration window
 
 **Tournament data flow:**
 - `tournament-2026.js` defines all 104 matches (72 group + 32 KO) as a static structure
@@ -28,6 +37,7 @@ Then open `http://localhost:8000`. There is no npm, no bundler, no build step �
 |------|---------|
 | `app.js` | All UI rendering, routing, scoring logic, Firebase calls |
 | `firebase-config.js` | Firebase credentials + `ADMIN_EMAIL` constant |
+| `pool-config.js` | URL-derived `POOL_ID` + per-pool `POOL_BRANDING` (title, logos, auth headings) |
 | `tournament-2026.js` | Hardcoded WM 2026 bracket structure (groups A–L, KO round pairings) |
 | `firestore.rules` | Firestore security rules — enforce bet time-lock and per-user write isolation |
 | `style.css` | CSS custom properties, responsive layout (max-width 720px) |
@@ -38,16 +48,21 @@ Then open `http://localhost:8000`. There is no npm, no bundler, no build step �
 - **1 pt** — correct outcome (home/draw/away)
 - **0 pts** — otherwise
 
-Points are written to `users/{uid}.totalPoints` via Firestore `increment()` when the admin finalizes a match result.
+Points are written to `pools/{poolId}/users/{uid}.totalPoints` via Firestore `increment()` when the admin finalizes a match result.
 
 ## Firestore Data Model
 
 ```
-users/{uid}           — name, email, totalPoints
-matches/{matchId}     — teams, kickoff, scores, homeRef/awayRef for KO rounds
-bets/{matchId}_{uid}  — homeGoals, awayGoals, points
-tournament/config     — teams mapping (group → [team names]), seeded flag
+pools/{poolId}/users/{uid}            — name, email, totalPoints (one profile per pool per Auth UID)
+pools/{poolId}/matches/{matchId}      — teams, kickoff, scores, homeRef/awayRef for KO rounds
+pools/{poolId}/bets/{matchId}_{uid}   — homeBet, awayBet, points
+pools/{poolId}/tournament/config      — teams mapping (group → [team names]), seeded flag
+pools/{poolId}/stats/public           — participantCount (readable unauthenticated)
+
+feedback/{autoId}                     — uid, name, email, pool, message, createdAt (shared inbox; admin sees both pools, badge per row)
 ```
+
+`poolId` is `"work"` or `"family"`, derived at runtime in [pool-config.js](pool-config.js) from the URL path.
 
 The bet document ID `{matchId}_{uid}` is intentional — it makes upserts idempotent and lets each user have exactly one bet per match.
 

@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WM-Tippspiel</title>
-  <link rel="stylesheet" href="style.css" />
+  <title id="page-title">WM-Tippspiel</title>
+  <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <img src="logo.png" class="nav-logo" alt="Logo" />
+      <img src="/logo.png" id="nav-logo" class="nav-logo" alt="Logo" />
     </div>
     <nav id="nav" class="nav hidden">
       <a href="#spiele">Tipps</a>
@@ -42,17 +42,36 @@
 
   <footer class="site-footer">
     Bei Problemen bitte die Seite neu laden oder
-    <a href="mailto:kevin.belortaja+wm@lebensraeume.at">kevin.belortaja+wm@lebensraeume.at</a>
-    kontaktieren.
+    <button type="button" id="feedback-link" class="footer-link">hier klicken</button>
   </footer>
+
+  <!-- Feedback-Modal -->
+  <template id="tpl-feedback-modal">
+    <div class="modal-backdrop">
+      <div class="modal card">
+        <h2 class="modal-title">Nachricht senden</h2>
+        <p class="modal-meta">Beschreibe kurz dein Problem oder Feedback.</p>
+        <label class="field">
+          <span>Nachricht</span>
+          <textarea class="feedback-message" rows="5" placeholder="Deine Nachricht…" required></textarea>
+        </label>
+        <p class="error modal-error"></p>
+        <p class="success modal-success"></p>
+        <div class="modal-actions">
+          <button type="button" class="link cancel-btn">Abbrechen</button>
+          <button type="button" class="primary send-btn">Senden</button>
+        </div>
+      </div>
+    </div>
+  </template>
 
   <!-- Login -->
   <template id="tpl-login">
     <div class="auth-split">
       <div class="auth-left">
-        <video class="auth-video" src="worldcup.mp4" autoplay muted loop playsinline></video>
+        <video class="auth-video" src="/worldcup.mp4" autoplay muted loop playsinline></video>
         <div class="auth-video-overlay"></div>
-        <img src="logo_white.png" class="auth-logo" alt="Logo" />
+        <img src="/logo_white.png" class="auth-logo" alt="Logo" />
         <h1 class="auth-title">WM-Tippspiel 2026</h1>
       </div>
       <div class="auth-right">
@@ -182,6 +201,6 @@
     </article>
   </template>
 
-  <script type="module" src="app.js"></script>
+  <script type="module" src="/app.js"></script>
 </body>
 </html>
